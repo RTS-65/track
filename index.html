@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track-IT Tracking (External)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        :root { --red: #d90429; --dark: #2b2d42; --light: #f4f7f6; --yellow: #f1c40f; --green: #2ecc71; --gray: #6c757d; }
+        body { font-family: 'Kanit', sans-serif; background: var(--light); margin: 0; padding: 0; color: #333; }
+        .container { max-width: 500px; margin: auto; padding: 20px; box-sizing: border-box; min-height: 100vh; }
+        
+        #searchPage { display: block; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h2 { color: var(--red); margin-bottom: 5px; }
+        
+        .input-group { background: white; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        input { width: 100%; padding: 15px; margin: 10px 0; border: 2px solid #eee; border-radius: 12px; box-sizing: border-box; font-size: 16px; font-family: 'Kanit'; }
+        
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 12px; font-size: 18px; cursor: pointer; transition: 0.3s; font-family: 'Kanit'; margin-top: 10px; font-weight: 600; }
+        .btn-main { background: var(--dark); color: white; }
+        .btn-outline { background: white; color: var(--red); border: 2px solid var(--red); }
+        .btn-file { background: white; color: var(--gray); border: 2px solid var(--gray); }
+        
+        #resultPage { display: none; background: white; min-height: 100vh; animation: slideIn 0.3s ease-out; }
+        
+        .status-header { background: var(--red); color: white; padding: 40px 20px; text-align: center; border-bottom-left-radius: 30px; border-bottom-right-radius: 30px; transition: background 0.5s ease; }
+        .bg-yellow { background: var(--yellow) !important; color: #2b2d42 !important; }
+        .bg-green { background: var(--green) !important; color: white !important; }
+
+        .status-icon { font-size: 60px; margin-bottom: 10px; }
+        .status-text { font-size: 24px; font-weight: 600; }
+        
+        .detail-card { padding: 30px 20px; }
+        .detail-item { margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #f0f0f0; }
+        .label { color: #888; font-size: 14px; margin-bottom: 5px; }
+        .value { font-size: 18px; font-weight: 500; color: var(--dark); }
+        
+        #reader { width: 100%; border-radius: 15px; overflow: hidden; margin-top: 15px; display: none; background: #000; }
+        
+        /* ซ่อน input file จริงของระบบ */
+        #fileInput { display: none; }
+
+        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.8); z-index: 100; justify-content: center; align-items: center; flex-direction: column; }
+        @keyframes slideIn { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+<div id="loadingOverlay" class="loading-overlay">
+    <p>กำลังประมวลผลข้อมูล...</p>
+</div>
+
+<div class="container" id="searchPage">
+    <div class="header">
+        <h2>ติดตามพัสดุ</h2>
+        <p>สแกน QR หรือกรอกรหัสพัสดุ</p>
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="trackInput" placeholder="กรอกรหัสพัสดุ (เช่น PKG-...)">
+        <button class="btn btn-main" onclick="doTrack()">ตรวจสอบสถานะ</button>
+        <div style="text-align: center; margin: 15px 0; color: #ccc;">──────── หรือ ────────</div>
+        
+        <button class="btn btn-outline" onclick="startScanner()">เปิดกล้องสแกน</button>
+        
+        <button class="btn btn-file" onclick="document.getElementById('fileInput').click()">เลือกรูปภาพจากเครื่อง</button>
+        <input type="file" id="fileInput" accept="image/*" onchange="handleFileSelect(event)">
+    </div>
+    <div id="reader"></div>
+</div>
+
+<div id="resultPage">
+    <div class="status-header" id="headerBg">
+        <div class="status-icon" id="resIcon">📦</div>
+        <div class="status-text" id="resStatus">กำลังโหลด...</div>
+        <div style="margin-top: 10px; opacity: 0.8;" id="resId"></div>
+    </div>
+    <div class="detail-card">
+        <div class="detail-item"><div class="label">📍 ปลายทาง</div><div class="value" id="resDest">-</div></div>
+        <div class="detail-item"><div class="label">📦 ประเภทสินค้า</div><div class="value" id="resType">-</div></div>
+        <div class="detail-item"><div class="label">🕒 อัปเดตล่าสุดเมื่อ</div><div class="value" id="resDate">-</div></div>
+        <button class="btn btn-main" style="margin-top: 20px;" onclick="goBack()">กลับไปหน้าค้นหา</button>
+    </div>
+</div>
+
+<script>
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxjoPXl1r69Cm466q1my9glCxb2oIaT4A2jgfkk-Qasmk2oR6sP5Bx8dhYgJbylawTN9w/exec"; 
+    let html5QrCode;
+
+    function startScanner() {
+        const readerDiv = document.getElementById('reader');
+        readerDiv.style.display = 'block';
+        if (html5QrCode) html5QrCode.clear();
+        
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start(
+            { facingMode: "environment" }, 
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+                onScanSuccess(decodedText);
+            }
+        ).catch(err => {
+            alert("กล้องมีปัญหา: " + err);
+            readerDiv.style.display = 'none';
+        });
+    }
+
+    // ฟังก์ชันจัดการเมื่อเลือกไฟล์รูปภาพ
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // ปิดกล้องก่อนถ้าเปิดอยู่
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+                document.getElementById('reader').style.display = 'none';
+                scanFile(file);
+            });
+        } else {
+            scanFile(file);
+        }
+    }
+
+    // ฟังก์ชันสแกนหา QR Code จากไฟล์
+    function scanFile(file) {
+        const tempReader = new Html5Qrcode("reader");
+        document.getElementById('loadingOverlay').style.display = 'flex';
+        
+        tempReader.scanFile(file, true)
+            .then(decodedText => {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                onScanSuccess(decodedText);
+            })
+            .catch(err => {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                alert("ไม่พบ QR Code ในรูปภาพนี้ กรุณาลองใช้อีกรูปหรือเปิดกล้องสแกนแทน");
+                console.error(err);
+            });
+    }
+
+    function onScanSuccess(decodedText) {
+        document.getElementById('trackInput').value = decodedText;
+        doTrack();
+        stopScanner();
+    }
+
+    function stopScanner() {
+        if (html5QrCode) {
+            html5QrCode.stop().then(() => {
+                document.getElementById('reader').style.display = 'none';
+            }).catch(() => {
+                document.getElementById('reader').style.display = 'none';
+            });
+        }
+    }
+
+    async function doTrack() {
+        const id = document.getElementById('trackInput').value.trim();
+        if (!id) return;
+
+        document.getElementById('loadingOverlay').style.display = 'flex';
+        
+        try {
+            const response = await fetch(`${WEB_APP_URL}?action=getTrack&id=${id}`);
+            const res = await response.json();
+
+            if (res.success) {
+                showResult(res);
+            } else {
+                alert("ไม่พบข้อมูล: " + (res.error || "รหัสไม่ถูกต้อง"));
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        } catch (err) {
+            console.error(err);
+            alert("การเชื่อมต่อขัดข้อง โปรดตรวจสอบอินเทอร์เน็ต");
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+    }
+
+    function showResult(res) {
+        document.getElementById('loadingOverlay').style.display = 'none';
+        document.getElementById('searchPage').style.display = 'none';
+        document.getElementById('resultPage').style.display = 'block';
+
+        const header = document.getElementById('headerBg');
+        const icon = document.getElementById('resIcon');
+        
+        header.className = "status-header";
+        icon.innerText = "📦";
+
+        document.getElementById('resStatus').innerText = res.status;
+        document.getElementById('resId').innerText = "รหัสพัสดุ: " + res.id;
+        document.getElementById('resDest').innerText = res.dest;
+        document.getElementById('resType').innerText = res.type;
+        document.getElementById('resDate').innerText = res.date;
+
+        if (res.status.includes("ขึ้นขบวนรถ")) {
+            header.classList.add("bg-yellow");
+            icon.innerText = "🚂";
+        } else if (res.status.includes("ถึงปลายทาง")) {
+            header.classList.add("bg-green");
+            icon.innerText = "✅";
+        }
+    }
+
+    function goBack() {
+        document.getElementById('resultPage').style.display = 'none';
+        document.getElementById('searchPage').style.display = 'block';
+        document.getElementById('trackInput').value = "";
+        document.getElementById('fileInput').value = ""; // ล้างค่าไฟล์เดิม
+        stopScanner();
+    }
+</script>
+</body>
+</html>
