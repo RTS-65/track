@@ -156,28 +156,41 @@
         }
     }
 
-    async function doTrack() {
-        const id = document.getElementById('trackInput').value.trim();
-        if (!id) return;
+function doTrack() {
+    const id = document.getElementById('trackInput').value.trim();
+    if (!id) return;
 
-        document.getElementById('loadingOverlay').style.display = 'flex';
+    document.getElementById('loadingOverlay').style.display = 'flex';
+    
+    // สร้างชื่อฟังก์ชัน callback แบบสุ่มเพื่อให้ไม่ซ้ำกัน
+    const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
+    
+    // สร้างฟังก์ชันรอรับข้อมูล
+    window[callbackName] = function(res) {
+        delete window[callbackName]; // ลบฟังก์ชันทิ้งเมื่อใช้เสร็จ
+        document.body.removeChild(script); // ลบแท็ก script ทิ้ง
         
-        try {
-            const response = await fetch(`${WEB_APP_URL}?action=getTrack&id=${id}`);
-            const res = await response.json();
-
-            if (res.success) {
-                showResult(res);
-            } else {
-                alert("ไม่พบข้อมูล: " + (res.error || "รหัสไม่ถูกต้อง"));
-                document.getElementById('loadingOverlay').style.display = 'none';
-            }
-        } catch (err) {
-            console.error(err);
-            alert("การเชื่อมต่อขัดข้อง โปรดตรวจสอบอินเทอร์เน็ต");
+        if (res.success) {
+            showResult(res);
+        } else {
+            alert("ไม่พบข้อมูล: " + (res.error || "รหัสไม่ถูกต้อง"));
             document.getElementById('loadingOverlay').style.display = 'none';
         }
-    }
+    };
+
+    // สร้างแท็ก script เพื่อดึงข้อมูล (วิธีนี้จะไม่ติด CORS)
+    const script = document.createElement('script');
+    script.src = `${WEB_APP_URL}?action=getTrack&id=${encodeURIComponent(id)}&callback=${callbackName}`;
+    document.body.appendChild(script);
+
+    // กรณีที่เชื่อมต่อไม่ได้เกิน 10 วินาที
+    setTimeout(() => {
+        if (document.getElementById('loadingOverlay').style.display === 'flex') {
+            document.getElementById('loadingOverlay').style.display = 'none';
+            alert("การเชื่อมต่อใช้เวลานานเกินไป โปรดลองอีกครั้ง");
+        }
+    }, 10000);
+}
 
     function showResult(res) {
         document.getElementById('loadingOverlay').style.display = 'none';
